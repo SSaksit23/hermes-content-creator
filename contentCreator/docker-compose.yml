@@ -1,0 +1,64 @@
+services:
+  # Backend: LLM proxy (keeps the API key server-side)
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: travel-content-ai-api:latest
+    container_name: travel-content-ai-api
+    environment:
+      # Active provider: "openai" (default) or "gemini"
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      # Required when LLM_PROVIDER=openai (the default).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+      # Tavily search — used by the OpenAI driver for RAG/grounding instead
+      # of OpenAI's built-in web_search tool. Required when using useRAG=true.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      TAVILY_SEARCH_DEPTH: ${TAVILY_SEARCH_DEPTH:-advanced}
+      TAVILY_MAX_RESULTS: ${TAVILY_MAX_RESULTS:-8}
+      # Required only when LLM_PROVIDER=gemini.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-pro}
+      PORT: "8787"
+      # Optional CORS allowlist when the SPA is hosted separately (comma-separated).
+      # Not needed when nginx proxies /api/ on the same origin.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    expose:
+      - "8787"
+    restart: unless-stopped
+
+  # Production frontend: nginx serving the built SPA + proxying /api/ to `api`
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: travel-content-ai:latest
+    container_name: travel-content-ai
+    ports:
+      - "${APP_PORT:-3001}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Development: live Vite dev server with hot-reload.
+  # Vite proxies /api to the `api` service (see vite.config.ts).
+  dev:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      # Dev Vite proxy target; `api` is the compose service name on the shared network
+      VITE_DEV_API_TARGET: http://api:8787
+    ports:
+      # Vite listens on 3001 (see vite.config.ts); override with DEV_PORT for host.
+      - "${DEV_PORT:-3001}:3001"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    depends_on:
+      - api
+    profiles: ["dev"]
+
+volumes:
+  node_modules:

@@ -1,0 +1,22 @@
+{
+  "name": "travel-content-ai-proxy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Backend proxy that keeps the LLM API key (OpenAI / Gemini) server-side and exposes narrow, domain-specific endpoints to the SPA.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --env-file=../.env src/index.js",
+    "dev": "node --env-file=../.env src/index.js",
+    "dev:watch": "node --env-file=../.env --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^1.25.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "openai": "^6.35.0"
+  }
+}

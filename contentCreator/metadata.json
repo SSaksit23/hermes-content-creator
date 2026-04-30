@@ -1,0 +1,7 @@
+{
+  "name": "Travel Content AI Assistant lastest 09.04.26",
+  "description": "An AI assistant for travel content creators that understands cultural nuances and storytelling to produce engaging, authentic, and localized content for various destinations.",
+  "requestFramePermissions": [
+    "clipboard-read"
+  ]
+}
