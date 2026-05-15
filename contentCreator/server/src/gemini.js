@@ -5,6 +5,7 @@ import {
   buildEntityExtractionPrompt,
   parseDataUrl,
 } from "./prompts.js";
+import { sanitizeText, createStreamSanitizer } from "./sanitize.js";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-pro";
 
@@ -138,7 +139,7 @@ export async function generateTravelContent(params) {
       contents: { parts },
       config,
     });
-    return { text: response.text || "", sources: extractSources(response) };
+    return { text: sanitizeText(response.text || ""), sources: extractSources(response) };
   };
   return withRetry(apiCall);
 }
@@ -157,10 +158,12 @@ export async function streamTravelContent(params, { onDelta }) {
       config,
     });
     let finalResponse = null;
+    const sanitizer = createStreamSanitizer({ flush: onDelta });
     for await (const chunk of stream) {
-      if (chunk.text) onDelta(chunk.text);
+      if (chunk.text) sanitizer.push(chunk.text);
       finalResponse = chunk;
     }
+    sanitizer.end();
     return { sources: extractSources(finalResponse) };
   };
   return withRetry(apiCall);

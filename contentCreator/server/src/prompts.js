@@ -113,7 +113,10 @@ function getLanguageDiscipline(outputLanguage, inputLanguage) {
     ${crossScript ? `- The source material is in ${inputLanguage}, but you are writing for ${outputLanguage} readers. Do NOT paste raw ${inputLanguage}-script terms into the ${outputLanguage} prose. ${getScriptHint(outputLanguage)}` : ""}
     - **Addresses and street names:** Transliterate or translate them into ${outputLanguage}. Never paste a raw foreign-script address into the body of the text. If a precise address is essential for navigation, present the ${outputLanguage} version first, then the original script in parentheses at the END of that line only.
     - **Mixed-script test:** Before finalising any sentence, check that a monolingual ${outputLanguage} reader who cannot read ${inputLanguage === outputLanguage ? "any other script" : inputLanguage} could still parse the sentence end-to-end. If not, rewrite it.
-    - **One exception:** Inline citation links (Markdown URLs to source domains) keep their original Latin form — those are technical artefacts, not prose.
+
+- **No Source Citations (CRITICAL):**
+    - Do NOT include any source URLs, Markdown links, hyperlinks, or inline citations of any kind in the output. No \`[text](https://...)\`, no bare URLs, no "(source: ...)", no parenthetical attribution like "(จาก ChinaDaily)".
+    - Use the WEB RESEARCH DOSSIER (when provided) silently as background knowledge. The reader must see clean prose only — no link syntax, no domain names, no "according to ..." phrasing.
 
 - **Voice & Format Consistency:**
     - Use Markdown level-2 headers (##) for every section. Do NOT mix \`###\`, bold-only "**header**", and \`##\` styles in the same response. Pick \`##\` and stick with it.
@@ -191,7 +194,7 @@ Stay authentic and culturally grounded. Never resort to filler or stock phrasing
     <WEB_RESEARCH_TASK>
         1.  The WEB RESEARCH DOSSIER above already contains relevant search snippets and source URLs. Treat it as your primary factual source. You do NOT need to (and cannot) call any external tool — the research has already been performed for you.
         2.  Prioritise official websites and reputable travel guides from the dossier for factual data. Cross-check across multiple snippets when prices or hours conflict; if they conflict, present the most recent or note the range honestly.
-        3.  Cite the URLs you actually used inline as Markdown links at the end of the sentence they support, e.g. "เปิดทุกวัน 09:00–17:00 ([source name](https://example.com))".
+        3.  Do NOT cite or link any source URLs in the output. Use the dossier silently as background knowledge — the final prose must contain no Markdown links, no bare URLs, and no parenthetical source attributions.
         4.  You MUST explicitly mention prices and opening hours if they are available in the dossier; otherwise state explicitly that the information is not currently available online.
         ${isChineseContext ? `5. **Special Instruction for Chinese Attractions:** Some dossier sources may include Xiaohongshu (小红书) posts. You MAY use them for factual insights, but do NOT write in Xiaohongshu post style. Maintain a professional, objective storytelling tone.` : ""}
     </WEB_RESEARCH_TASK>
@@ -243,7 +246,7 @@ Stay authentic and culturally grounded. Never resort to filler or stock phrasing
 - **Research Source:** Use the WEB RESEARCH DOSSIER above as your primary factual source for this dish. The search has already been performed for you on "${searchQuery}".
 ${isChineseContext ? `- **Special Instruction for Chinese Meals:** Some dossier sources may be from Xiaohongshu (小红书). Use them for factual insights only — do NOT mimic Xiaohongshu post style. Maintain a professional storytelling tone.` : ""}
 - **Length & Structure:** Produce 3-4 paragraphs of continuous prose (roughly 200-350 words in ${outputLanguage}). Paragraph 1: sensory experience (aroma, texture, heat, balance, what your first bite is like). Paragraph 2: ingredients and preparation, named precisely. Paragraph 3: cultural role and origin. Optional paragraph 4: regional variations or where it is most authentically eaten today. NO bullet points inside the description.
-- **Synthesize Findings:** Weave researched facts into the narrative. Do not list them as bullets. Cite the URLs you actually used inline as Markdown links.
+- **Synthesize Findings:** Weave researched facts into the narrative. Do not list them as bullets. Do NOT include any source URLs, Markdown links, or parenthetical citations — the dossier is background knowledge only.
 - **Specificity:** Name the actual ingredients (which chilli, which fish, which fermentation). Avoid stock phrases ("explosion of flavour", "tantalising", "mouth-watering").
 - **Authenticity:** Ground the description in how the dish is actually eaten in its place of origin, not in tourist menus.
       `;
@@ -252,7 +255,7 @@ ${isChineseContext ? `- **Special Instruction for Chinese Meals:** Some dossier 
 - **Research Source:** Use the WEB RESEARCH DOSSIER above as your primary factual source. The search has already been performed for you on "${searchQuery}".
 ${isChineseContext ? `- **Special Instruction for Chinese locations:** Some dossier sources may be from Xiaohongshu (小红书). Use them for factual insights only — do NOT mimic Xiaohongshu post style. Maintain a professional storytelling tone.` : ""}
 - **Length & Structure:** Produce a substantive piece of continuous prose (at least 3 paragraphs, roughly 250-400 words in ${outputLanguage}). Open with a concrete sensory or human image, not a definition. NO bullet points inside the narrative.
-- **Synthesize Findings:** Weave the dossier facts into a continuous narrative. Do not list facts. Cite the URLs you actually used inline as Markdown links.
+- **Synthesize Findings:** Weave the dossier facts into a continuous narrative. Do not list facts. Do NOT include any source URLs, Markdown links, or parenthetical citations — the dossier is background knowledge only.
 - **Specificity:** Use specific names, dates, and details rather than generic adjectives. If a fact is unavailable from the dossier, say so explicitly rather than padding with vague language.
       `;
     }
@@ -319,7 +322,7 @@ export function buildContentRequest(params) {
   const { systemInstruction, taskPrompt, useMealSearch } = buildPrompts(params);
 
   const researchBlock = searchContext
-    ? `\n--- BEGIN WEB RESEARCH DOSSIER ---\n${searchContext}\n--- END WEB RESEARCH DOSSIER ---\n\nUse the dossier above as your primary factual source for prices, hours, addresses, and any other current data. Cite the URLs you actually used inline as Markdown links at the end of the relevant sentence (e.g. "150 หยวน ([source](https://example.com))"). Do NOT invent facts that are not in the dossier; if a fact is missing, state that the information is not currently available rather than guessing.\n\n`
+    ? `\n--- BEGIN WEB RESEARCH DOSSIER ---\n${searchContext}\n--- END WEB RESEARCH DOSSIER ---\n\nUse the dossier above as your primary factual source for prices, hours, addresses, and any other current data. Treat the dossier as silent background knowledge: do NOT include any source URLs, Markdown links, bare URLs, domain names, or parenthetical attributions in the output — the reader must see clean prose only. Do NOT invent facts that are not in the dossier; if a fact is missing, state that the information is not currently available rather than guessing.\n\n`
     : "";
 
   const parts = [];

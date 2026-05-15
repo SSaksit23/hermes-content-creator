@@ -5,6 +5,7 @@ import {
   buildEntityExtractionPrompt,
 } from "./prompts.js";
 import { tavilySearch, formatSearchResultsForPrompt } from "./tavily.js";
+import { sanitizeText, createStreamSanitizer } from "./sanitize.js";
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
 const TAVILY_MAX_RESULTS = Number.parseInt(process.env.TAVILY_MAX_RESULTS || "8", 10);
@@ -238,7 +239,7 @@ export async function generateTravelContent(params) {
     const client = getClient();
     const response = await client.responses.create(requestParams);
     return {
-      text: response.output_text || "",
+      text: sanitizeText(response.output_text || ""),
       sources: searchOutcome?.sources || [],
     };
   };
@@ -272,11 +273,13 @@ export async function streamTravelContent(params, { onDelta }) {
   const apiCall = async () => {
     const client = getClient();
     const stream = await client.responses.stream(requestParams);
+    const sanitizer = createStreamSanitizer({ flush: onDelta });
     for await (const event of stream) {
       if (event?.type === "response.output_text.delta" && event.delta) {
-        onDelta(event.delta);
+        sanitizer.push(event.delta);
       }
     }
+    sanitizer.end();
     await stream.finalResponse();
     return { sources: searchOutcome?.sources || [] };
   };
