@@ -1,6 +1,11 @@
 /// <reference types="vite/client" />
 import supabaseManager from './supabaseService';
 import { ContentType, Language, Source } from '../types';
+import { sanitizeText } from './sanitize';
+
+// Bump when the output post-processing pipeline changes (e.g. sanitizer added)
+// so prior cache rows are bypassed instead of replayed verbatim.
+const POST_PROCESS_VERSION = 'v2-no-source-urls';
 
 /**
  * The client no longer talks to any LLM directly — all calls go through the
@@ -211,6 +216,9 @@ export const generateTravelContent = async ({
         // (and vice versa).
         provider,
         model,
+        // Bust the cache when output post-processing changes so legacy rows
+        // with inline source URLs are not served verbatim.
+        postProcessVersion: POST_PROCESS_VERSION,
     };
 
     const hashString = JSON.stringify(Object.entries(queryParams).sort());
@@ -227,9 +235,12 @@ export const generateTravelContent = async ({
 
             if (cachedData) {
                 console.log(`Cache hit for "${userInput}"`);
-                if (onChunk) onChunk(cachedData.content);
+                // Re-sanitize on read so any pre-existing rows that were stored
+                // before the server-side sanitizer was added still come out clean.
+                const cleaned = sanitizeText(cachedData.content || '');
+                if (onChunk) onChunk(cleaned);
                 return {
-                    text: cachedData.content,
+                    text: cleaned,
                     sources: cachedData.sources || [],
                 };
             }
@@ -291,6 +302,10 @@ export const generateTravelContent = async ({
         text = data.text || '';
         sources = Array.isArray(data.sources) ? data.sources : [];
     }
+
+    // Defense in depth: scrub again on the client in case the user is still
+    // running an older backend container that pre-dates the server sanitizer.
+    text = sanitizeText(text);
 
     if (supabase) {
         try {
