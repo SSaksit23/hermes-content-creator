@@ -130,13 +130,49 @@ function getLanguageDiscipline(outputLanguage, inputLanguage) {
 function getPromptInstructions(contentType) {
   switch (contentType) {
     case CONTENT_TYPES.CITY:
-      return "Produce a 3-5 paragraph destination essay. Open with a sensory image that places the reader on the ground, then weave history, character, and cultural nuance into a continuous arc. Do NOT enumerate tourist attractions. Use specific, lived details rather than generic superlatives, and let the city's contradictions and texture come through.";
+      return `Produce a 3-5 paragraph destination essay that gives a reader a real grasp of WHAT this city is and WHY it became that way.
+
+OPENING DISCIPLINE:
+- Choose the opening that genuinely best fits THIS city. Do NOT default to a weather/atmosphere hook. Rotate naturally among these archetypes; pick whichever is most reasonable for the subject:
+  1. Historical anchor — when and why the city came into being, who founded it or shaped it, what role it has played (port, capital, frontier, treaty city, industrial centre, religious site).
+  2. Geographical / strategic position — where it sits on the map and why that position determined its character (river mouth, mountain pass, border, oasis, peninsula).
+  3. Defining identity statement — the single most accurate sentence about what this city actually IS in the country today (e.g. one of the few cities where X happens, the only place that Y, the modern descendant of Z).
+  4. Concrete, specific scene — a real fixture of daily life that is genuinely characteristic of the city (a market, a railway, an industry, a custom). Use this only when you can name something specific and verifiable, not a generic "morning street" tableau.
+- After the opening paragraph, weave history, geography, economy, demographics, and present-day texture into a continuous arc. Show how the city's past explains its present.
+- Do NOT enumerate tourist attractions. Use specific, lived details rather than generic superlatives, and let the city's contradictions come through.
+
+BANNED OPENINGS (these have become formulaic — do not use them):
+- Any variation of "the morning wind / river breeze / sea air brushes / hits / touches your face".
+- "Early morning in [City]…" / "As dawn breaks over [City]…" / "เช้าตรู่ที่…" openings unless dawn is genuinely the point of the piece.
+- "Walking through the streets of [City], you feel…" generic-stroll openings.
+- "Imagine yourself in…" / "Picture this…" reader-prompt openings.`;
     case CONTENT_TYPES.ATTRACTION:
-      return "Produce a vivid, multi-paragraph description with real storytelling. Open with a sensory or historical hook, explain what makes the place unique, what a visitor actually does there, and why it matters culturally or historically. Use psychological triggers (curiosity, anticipation, a sense of discovery) implicitly through specific detail rather than overt sales language.";
+      return `Produce a vivid, multi-paragraph description with real storytelling.
+
+OPENING DISCIPLINE:
+- Open with whichever is most reasonable for THIS attraction; do NOT default to a sensory weather hook. Choose among:
+  1. Historical fact — when it was built, by whom, and why (dynasty, ruler, event, purpose).
+  2. Significance / claim to fame — its specific role (largest, oldest, only, UNESCO listing, key event that happened here).
+  3. Physical or geographical reality — its scale, location, structure, what it physically IS.
+  4. The visitor's encounter with the place — a concrete, specific moment of arrival or observation that only applies to THIS site (not a generic "the wind blows" opener).
+- Explain what makes the place unique, what a visitor actually does there, and why it matters culturally or historically. Use curiosity and anticipation implicitly through specific detail rather than overt sales language.
+
+BANNED OPENINGS:
+- "The wind / breeze / air brushes your face."
+- "Early morning at…" / "As the sun rises over…" unless the time of day is genuinely the subject.
+- "Walking up to / into [attraction], you…" generic-approach openings.
+- "Imagine standing at…" reader-prompt openings.`;
     case CONTENT_TYPES.SOCIAL_MEDIA_POST:
       return "Write a single, platform-native social-media post. Lead with a strong hook, deliver one clear insight or image, and close with 3-5 hashtags that real users search. No clichés. Match length and tone to the platform.";
     case CONTENT_TYPES.MEAL_DESCRIPTION:
-      return "Produce a multi-paragraph food description. Open with the sensory experience (aroma, texture, heat, balance), then move into ingredients, traditional preparation, and cultural role. Name specific ingredients and techniques. Avoid stock phrases like 'explosion of flavour'.";
+      return `Produce a multi-paragraph food description.
+
+OPENING DISCIPLINE:
+- Open with whichever is most natural for THIS dish; vary among:
+  1. Origin / history — where and when the dish emerged, who eats it for which occasion.
+  2. Identity statement — what the dish actually IS in one accurate sentence (a noodle soup of X, a fermented Y from Z region).
+  3. Sensory experience of the dish itself (aroma, texture, balance) — use this when the dish's defining trait is genuinely sensory, NOT as a default opener.
+- Move into ingredients, traditional preparation, and cultural role. Name specific ingredients and techniques. Avoid stock phrases like "explosion of flavour".`;
     default:
       return "Produce high-quality travel content with specific sensory detail and authentic cultural context. Avoid generic superlatives.";
   }
@@ -167,7 +203,7 @@ export function buildPrompts({
 
 Your output language is ${outputLanguage}. EVERY character of your response — the first word, every section header, every bullet, every place name, every address — must be in ${outputLanguage}. Never start a response in another language and switch mid-sentence. When source material is in ${inputLanguage} but the reader needs ${outputLanguage}, transliterate or translate foreign-script names into ${outputLanguage}; do not paste raw foreign script into the body of the prose.
 
-Stay authentic and culturally grounded. Never resort to filler or stock phrasing. Every sentence must add a sensory image, a fact, a piece of context, or an emotional beat.`;
+Stay authentic and culturally grounded. Never resort to filler or stock phrasing. Every sentence must add a fact, a piece of historical or cultural context, a sensory image, or a meaningful observation — but vary which of these you lead with. Do NOT make sensory weather descriptions ("the wind brushes your face", "early morning in...", "as dawn breaks...", "walking through the streets...") your default opening; those have become formulaic and must be reserved for cases where they are genuinely the most accurate framing.`;
 
   const toneInstruction = tone ? `- The tone of the content should be: ${tone}.` : "";
   const dayInstruction = day
@@ -188,7 +224,7 @@ Stay authentic and culturally grounded. Never resort to filler or stock phrasing
       ragInstruction = `
 <INSTRUCTIONS>
     <CONTEXT>
-        You are producing a long-form, magazine-quality guide for a traveler about "${searchQuery}". Two things matter equally: (a) a substantive, sensory, multi-paragraph narrative opening that places the reader on the ground at the attraction, and (b) accurate, current, comprehensive factual information drawn from the WEB RESEARCH DOSSIER provided above. Do NOT compress the narrative into one sentence — that is the most common failure mode and you must avoid it.
+        You are producing a long-form, magazine-quality guide for a traveler about "${searchQuery}". Two things matter equally: (a) a substantive, multi-paragraph narrative that ORIENTS the reader to what this attraction IS — opening with its history, significance, or geographical reality (NOT with a generic sensory weather hook), and (b) accurate, current, comprehensive factual information drawn from the WEB RESEARCH DOSSIER provided above. Do NOT compress the narrative into one sentence — that is the most common failure mode and you must avoid it.
     </CONTEXT>
 
     <WEB_RESEARCH_TASK>
@@ -203,10 +239,14 @@ Stay authentic and culturally grounded. Never resort to filler or stock phrasing
         Your response MUST be structured in the following order using Markdown level-2 headers (##), each header in ${outputLanguage}:
 
         Section 1 — Introductory narrative (REQUIRED: 3 to 5 full paragraphs of CONTINUOUS prose, roughly 250-450 words total in ${outputLanguage}, NO bullet points inside this section):
-            - Paragraph 1: Place the reader on the ground. Lead with a specific sensory image — what they see, hear, smell, or feel arriving — not a generic statement that the place is "beautiful" or "famous".
-            - Paragraph 2: Explain the historical, cultural, religious, or natural significance of the attraction. Why does it exist? Why does it matter? Use specific dates, dynasties, names, or events when known.
-            - Paragraph 3: Describe what a visitor actually does and experiences there — the path through the site, the rituals, the views, the encounters — in concrete, lived detail.
-            - (Optional paragraph 4-5): A texture-rich detail that most travelers miss: a side hall, a viewpoint, a seasonal change, a local custom.
+            - Paragraph 1 (ORIENTATION & SIGNIFICANCE): Open with whichever of these is most reasonable for the subject — do NOT default to a sensory weather hook:
+                (a) the historical fact (when it was built/founded, by whom, for what purpose);
+                (b) the specific significance / claim to fame (largest, oldest, only, UNESCO status, a key event);
+                (c) the geographical or physical reality (where it sits, what it physically IS).
+              BANNED openings: any "wind / breeze / sea air brushes your face", any "early morning at…", any "as the sun rises over…", any "imagine standing at…", any "walking up to [place], you feel…". These are forbidden.
+            - Paragraph 2 (DEEPER CONTEXT): Expand on the dimension you did NOT cover in paragraph 1 — if paragraph 1 was history, this one is cultural/religious/social significance; if paragraph 1 was geography, this one is history. Use specific dates, dynasties, names, or events when known.
+            - Paragraph 3 (THE VISIT): Describe what a visitor actually does and experiences there — the path through the site, the rituals, the views, the specific encounters. This is the paragraph where concrete sensory detail is welcome IF it is grounded in something specific to this place (a particular hall, a particular sound, a particular crop) rather than a generic weather opener.
+            - (Optional paragraph 4-5): A texture-rich detail most travellers miss: a side hall, a viewpoint, a seasonal change, a local custom.
             - Style: magazine-feature writing, not a brochure. Specific verbs and concrete nouns. Avoid clichés ("hidden gem", "must-visit", "breathtaking", "an explosion of"). Do NOT enumerate practical-info bullets here.
 
         Section 2 — Practical information (logistics, see CONTENT_REQUIREMENTS).
@@ -245,7 +285,7 @@ Stay authentic and culturally grounded. Never resort to filler or stock phrasing
       ragInstruction = `
 - **Research Source:** Use the WEB RESEARCH DOSSIER above as your primary factual source for this dish. The search has already been performed for you on "${searchQuery}".
 ${isChineseContext ? `- **Special Instruction for Chinese Meals:** Some dossier sources may be from Xiaohongshu (小红书). Use them for factual insights only — do NOT mimic Xiaohongshu post style. Maintain a professional storytelling tone.` : ""}
-- **Length & Structure:** Produce 3-4 paragraphs of continuous prose (roughly 200-350 words in ${outputLanguage}). Paragraph 1: sensory experience (aroma, texture, heat, balance, what your first bite is like). Paragraph 2: ingredients and preparation, named precisely. Paragraph 3: cultural role and origin. Optional paragraph 4: regional variations or where it is most authentically eaten today. NO bullet points inside the description.
+- **Length & Structure:** Produce 3-4 paragraphs of continuous prose (roughly 200-350 words in ${outputLanguage}). Paragraph 1 opens with whichever fits best — origin/history, identity statement, or sensory experience — but NEVER defaults to a generic weather/morning/breeze opener. Paragraph 2: ingredients and preparation, named precisely. Paragraph 3: cultural role and origin (or sensory detail, if paragraph 1 was historical). Optional paragraph 4: regional variations or where it is most authentically eaten today. NO bullet points inside the description.
 - **Synthesize Findings:** Weave researched facts into the narrative. Do not list them as bullets. Do NOT include any source URLs, Markdown links, or parenthetical citations — the dossier is background knowledge only.
 - **Specificity:** Name the actual ingredients (which chilli, which fish, which fermentation). Avoid stock phrases ("explosion of flavour", "tantalising", "mouth-watering").
 - **Authenticity:** Ground the description in how the dish is actually eaten in its place of origin, not in tourist menus.
@@ -254,7 +294,7 @@ ${isChineseContext ? `- **Special Instruction for Chinese Meals:** Some dossier 
       ragInstruction = `
 - **Research Source:** Use the WEB RESEARCH DOSSIER above as your primary factual source. The search has already been performed for you on "${searchQuery}".
 ${isChineseContext ? `- **Special Instruction for Chinese locations:** Some dossier sources may be from Xiaohongshu (小红书). Use them for factual insights only — do NOT mimic Xiaohongshu post style. Maintain a professional storytelling tone.` : ""}
-- **Length & Structure:** Produce a substantive piece of continuous prose (at least 3 paragraphs, roughly 250-400 words in ${outputLanguage}). Open with a concrete sensory or human image, not a definition. NO bullet points inside the narrative.
+- **Length & Structure:** Produce a substantive piece of continuous prose (at least 3 paragraphs, roughly 250-400 words in ${outputLanguage}). Open with whichever fits best — a historical anchor, a geographical/strategic-position statement, a defining identity sentence, or a concrete specific scene. DO NOT open with a generic sensory weather hook (no "wind brushes your face", no "early morning in [city]", no "as dawn breaks", no "walking through the streets…"). NO bullet points inside the narrative.
 - **Synthesize Findings:** Weave the dossier facts into a continuous narrative. Do not list facts. Do NOT include any source URLs, Markdown links, or parenthetical citations — the dossier is background knowledge only.
 - **Specificity:** Use specific names, dates, and details rather than generic adjectives. If a fact is unavailable from the dossier, say so explicitly rather than padding with vague language.
       `;
@@ -285,6 +325,12 @@ ${isChineseContext ? `- **Special Instruction for Chinese locations:** Some doss
     - **Style Constraint:** Do NOT write the content in the style of a Xiaohongshu post or purely social media dump. Maintain an objective, professional storytelling tone tailored to the customer. Use any social media research ONLY for factual insights, not for stylistic mimicry.
     - **Substance Constraint:** Narrative sections must be real prose, not one-liners. If the brief calls for a multi-paragraph description, you must deliver multiple paragraphs of actual storytelling, not a single sentence followed by bullet points.
     - **Specificity Constraint:** Prefer concrete nouns and specific verbs over adjective-stacking. Avoid the following stock phrases entirely: "hidden gem", "must-visit", "breathtaking", "an explosion of flavour", "tantalising", "mouth-watering", "a feast for the senses".
+    - **Opening Constraint (CRITICAL):** Do NOT open the response with any of the following formulaic patterns, in any language (including Thai, Chinese, English):
+        - "[weather/air/wind] brushes / hits / touches your face" ("ลม...พัดเข้ามาปะทะใบหน้า", "微风拂面", "the breeze brushes your face").
+        - "Early morning in [place]…" / "เช้าตรู่ที่…" / "清晨的…" / "As dawn breaks over…".
+        - "Walking through the streets of [place], you feel/see/smell…" / "เดินไปตามถนนของ…".
+        - "Imagine yourself in / Picture this / Imagine standing at…" / "ลองจินตนาการว่า…".
+      Instead, open with a historical fact, a geographical/strategic-position statement, a defining identity sentence, or a concrete subject-specific detail that is verifiable rather than atmospheric.
     - Ensure the tone is engaging and authentic.
     - Integrate storytelling elements where appropriate.
     - Make sure the content is culturally appropriate for a ${outputLanguage}-speaking audience.

@@ -3,9 +3,11 @@ import supabaseManager from './supabaseService';
 import { ContentType, Language, Source } from '../types';
 import { sanitizeText } from './sanitize';
 
-// Bump when the output post-processing pipeline changes (e.g. sanitizer added)
-// so prior cache rows are bypassed instead of replayed verbatim.
-const POST_PROCESS_VERSION = 'v2-no-source-urls';
+// Bump when the prompt or output post-processing pipeline changes so prior
+// cache rows are bypassed instead of replayed verbatim.
+//   v2 — server-side sanitizer added, source URLs stripped
+//   v3 — opening-paragraph guidance overhauled (no more "wind on the face")
+const POST_PROCESS_VERSION = 'v3-varied-openings';
 
 /**
  * The client no longer talks to any LLM directly — all calls go through the
