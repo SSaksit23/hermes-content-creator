@@ -8,7 +8,8 @@ import { sanitizeText } from './sanitize';
 //   v2 — server-side sanitizer added, source URLs stripped
 //   v3 — opening-paragraph guidance overhauled (no more "wind on the face")
 //   v4 — OSRM "distance from previous stop" header injected per item
-const POST_PROCESS_VERSION = 'v4-distance-header';
+//   v4a — fix: walk the live items list to find previous same-day predecessor
+const POST_PROCESS_VERSION = 'v4a-distance-header';
 
 /**
  * The client no longer talks to any LLM directly — all calls go through the

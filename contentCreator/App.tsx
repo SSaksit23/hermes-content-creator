@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 import { ControlPanel } from './components/ControlPanel';
@@ -54,6 +54,12 @@ const App: React.FC = () => {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [lastAction, setLastAction] = useState<(() => void) | null>(null);
+
+  // Mirror of generatedItems for use inside runGenerationLoop's stable
+  // useCallback closure: lets us walk back to the previous same-day item
+  // when regenerating or resuming without re-creating the loop callback.
+  const generatedItemsRef = useRef<GeneratedItem[]>([]);
+  useEffect(() => { generatedItemsRef.current = generatedItems; }, [generatedItems]);
 
   const AUTOSAVE_KEY = 'travelAIAutosave_v2';
   const PRESETS_KEY = 'travelAIPresets_v2';
@@ -319,13 +325,19 @@ const App: React.FC = () => {
         setGeneratedItems(prev => prev.map(p => p.id === item.id ? { ...p, status: 'generating' } : p));
 
         // Find the previous same-day entity (if any) to hint the OSRM route
-        // lookup on the server. First-of-day items get no previousEntity, so
-        // they generate without a distance header.
+        // lookup on the server. We resolve against the live generatedItems
+        // ref (falling back to itemsToProcess on the very first run before
+        // setGeneratedItems has committed) so that single-item regenerations
+        // and partial resumes also find the correct predecessor.
         let previousEntity: { name: string; disambiguationQuery: string } | undefined;
         if (item.day) {
-          for (let j = i - 1; j >= 0; j--) {
-            const candidate = itemsToProcess[j];
-            if (candidate.day === item.day) {
+          const live = generatedItemsRef.current;
+          const fullList = live.length > 0 ? live : itemsToProcess;
+          let currentIdx = fullList.findIndex(p => p.id === item.id);
+          if (currentIdx < 0) currentIdx = fullList.length;
+          for (let j = currentIdx - 1; j >= 0; j--) {
+            const candidate = fullList[j];
+            if (candidate.day === item.day && candidate.id !== item.id) {
               previousEntity = {
                 name: candidate.name,
                 disambiguationQuery: candidate.disambiguationQuery || candidate.name,
