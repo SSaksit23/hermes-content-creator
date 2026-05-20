@@ -7,7 +7,8 @@ import { sanitizeText } from './sanitize';
 // cache rows are bypassed instead of replayed verbatim.
 //   v2 — server-side sanitizer added, source URLs stripped
 //   v3 — opening-paragraph guidance overhauled (no more "wind on the face")
-const POST_PROCESS_VERSION = 'v3-varied-openings';
+//   v4 — OSRM "distance from previous stop" header injected per item
+const POST_PROCESS_VERSION = 'v4-distance-header';
 
 /**
  * The client no longer talks to any LLM directly — all calls go through the
@@ -115,6 +116,11 @@ export const extractEntitiesFromDocument = async ({
     return Array.isArray(data.entities) ? data.entities : [];
 };
 
+interface PreviousEntityHint {
+    name: string;
+    disambiguationQuery: string;
+}
+
 interface GenerateContentParams {
     contentType: ContentType;
     inputLanguage: Language;
@@ -128,6 +134,7 @@ interface GenerateContentParams {
     socialPlatform?: string;
     talkingPoints?: string;
     day?: string;
+    previousEntity?: PreviousEntityHint;
     onChunk?: (text: string) => void;
 }
 
@@ -196,6 +203,7 @@ export const generateTravelContent = async ({
     socialPlatform,
     talkingPoints,
     day,
+    previousEntity,
     onChunk,
 }: GenerateContentParams): Promise<{ text: string; sources: Source[] }> => {
     const imageSignatures = await Promise.all(documentImages.map(img => hashDataUrl(img)));
@@ -213,6 +221,11 @@ export const generateTravelContent = async ({
         socialPlatform,
         talkingPoints,
         day,
+        // Include the previous-stop hint in the cache key so two items on
+        // different days (or with different predecessors) don't collide.
+        previousEntityKey: previousEntity
+            ? `${previousEntity.name}::${previousEntity.disambiguationQuery}`
+            : '',
         // Bust the cache when the active LLM provider/model changes so we
         // don't serve a Gemini-flavored row to an OpenAI-configured backend
         // (and vice versa).
@@ -266,6 +279,7 @@ export const generateTravelContent = async ({
         socialPlatform,
         talkingPoints,
         day,
+        previousEntity,
     };
 
     const shouldStream = typeof onChunk === 'function';

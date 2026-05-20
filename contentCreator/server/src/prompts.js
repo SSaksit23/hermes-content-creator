@@ -191,6 +191,7 @@ export function buildPrompts({
   day,
   documentContext = "",
   documentImages = [],
+  previousLeg = null,
 }) {
   const isChineseContext =
     inputLanguage === "Chinese" ||
@@ -208,6 +209,12 @@ Stay authentic and culturally grounded. Never resort to filler or stock phrasing
   const toneInstruction = tone ? `- The tone of the content should be: ${tone}.` : "";
   const dayInstruction = day
     ? `- This item is part of the itinerary for: ${day}. Ensure the narrative flows logically if applicable.`
+    : "";
+  const previousLegInstruction = previousLeg
+    ? `- **Distance from previous stop (verified fact):** ${previousLeg}
+        - You MAY weave this distance/duration once into the narrative if it fits naturally (e.g. as a transitional sentence at the start of the description or in the practical-info section). Keep the figures EXACTLY as given.
+        - Do NOT invent any other distances, durations, or travel-time figures that are not in this brief.
+        - A distance header line will be prepended to the final output automatically, so it is acceptable to not mention the figures in your prose at all if a natural mention is hard to fit.`
     : "";
 
   const isMeal = contentType === CONTENT_TYPES.MEAL_DESCRIPTION;
@@ -320,7 +327,7 @@ ${isChineseContext ? `- **Special Instruction for Chinese locations:** Some doss
     ---
     **Guidelines for this task:**
     - ${instructions}
-    ${toneInstruction}${dayInstruction}${ragInstruction}${socialMediaInstruction}
+    ${toneInstruction}${dayInstruction}${previousLegInstruction}${ragInstruction}${socialMediaInstruction}
     ${getLanguageDiscipline(outputLanguage, inputLanguage)}
     - **Style Constraint:** Do NOT write the content in the style of a Xiaohongshu post or purely social media dump. Maintain an objective, professional storytelling tone tailored to the customer. Use any social media research ONLY for factual insights, not for stylistic mimicry.
     - **Substance Constraint:** Narrative sections must be real prose, not one-liners. If the brief calls for a multi-paragraph description, you must deliver multiple paragraphs of actual storytelling, not a single sentence followed by bullet points.

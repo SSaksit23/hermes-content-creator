@@ -6,6 +6,7 @@ import {
   parseDataUrl,
 } from "./prompts.js";
 import { sanitizeText, createStreamSanitizer } from "./sanitize.js";
+import { getRouteBetween, formatLegHeader, formatLegForPrompt } from "./routing.js";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-pro";
 
@@ -97,9 +98,9 @@ export async function extractEntitiesFromDocument({
 /*  Travel-content generation                                          */
 /* ------------------------------------------------------------------ */
 
-function toGeminiRequest(params) {
+function toGeminiRequest(params, previousLeg = null) {
   const { systemInstruction, parts: abstractParts, generation, useWebSearch } =
-    buildContentRequest(params);
+    buildContentRequest({ ...params, previousLeg });
 
   const parts = abstractParts.map((p) =>
     p.text !== undefined
@@ -119,6 +120,21 @@ function toGeminiRequest(params) {
   return { parts, config };
 }
 
+async function resolvePreviousLeg(params) {
+  const prev = params.previousEntity;
+  if (!prev) return { leg: null, promptFact: null };
+  const prevQuery = (prev.disambiguationQuery || prev.name || "").trim();
+  const currentQuery = (params.disambiguationQuery || params.userInput || "").trim();
+  if (!prevQuery || !currentQuery) return { leg: null, promptFact: null };
+  const leg = await getRouteBetween(prevQuery, currentQuery, {
+    outputLanguage: params.outputLanguage,
+  });
+  if (!leg) return { leg: null, promptFact: null };
+  leg.fromName = prev.name || leg.fromName;
+  leg.toName = params.userInput || leg.toName;
+  return { leg, promptFact: formatLegForPrompt(leg) };
+}
+
 function extractSources(response) {
   const groundingChunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
   const sources = groundingChunks
@@ -131,7 +147,8 @@ function extractSources(response) {
  * Non-streaming content generation. Returns { text, sources }.
  */
 export async function generateTravelContent(params) {
-  const { parts, config } = toGeminiRequest(params);
+  const legInfo = await resolvePreviousLeg(params);
+  const { parts, config } = toGeminiRequest(params, legInfo.promptFact);
   const apiCall = async () => {
     const ai = getClient();
     const response = await ai.models.generateContent({
@@ -139,7 +156,10 @@ export async function generateTravelContent(params) {
       contents: { parts },
       config,
     });
-    return { text: sanitizeText(response.text || ""), sources: extractSources(response) };
+    const cleaned = sanitizeText(response.text || "");
+    const header = formatLegHeader(legInfo.leg, params.outputLanguage);
+    const text = header ? `${header}\n\n${cleaned}` : cleaned;
+    return { text, sources: extractSources(response) };
   };
   return withRetry(apiCall);
 }
@@ -149,9 +169,13 @@ export async function generateTravelContent(params) {
  * then resolves with the final `{ sources }`.
  */
 export async function streamTravelContent(params, { onDelta }) {
-  const { parts, config } = toGeminiRequest(params);
+  const legInfo = await resolvePreviousLeg(params);
+  const { parts, config } = toGeminiRequest(params, legInfo.promptFact);
   const apiCall = async () => {
     const ai = getClient();
+    const header = formatLegHeader(legInfo.leg, params.outputLanguage);
+    if (header) onDelta(`${header}\n\n`);
+
     const stream = await ai.models.generateContentStream({
       model: GEMINI_MODEL,
       contents: { parts },

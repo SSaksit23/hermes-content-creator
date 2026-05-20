@@ -6,6 +6,7 @@ import {
 } from "./prompts.js";
 import { tavilySearch, formatSearchResultsForPrompt } from "./tavily.js";
 import { sanitizeText, createStreamSanitizer } from "./sanitize.js";
+import { getRouteBetween, formatLegHeader, formatLegForPrompt } from "./routing.js";
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
 const TAVILY_MAX_RESULTS = Number.parseInt(process.env.TAVILY_MAX_RESULTS || "8", 10);
@@ -196,10 +197,11 @@ async function fetchSearchOutcome(params) {
   };
 }
 
-function buildResponsesParams(params, searchContext) {
+function buildResponsesParams(params, searchContext, previousLeg) {
   const { systemInstruction, parts, generation } = buildContentRequest({
     ...params,
     searchContext,
+    previousLeg,
   });
 
   return {
@@ -213,6 +215,28 @@ function buildResponsesParams(params, searchContext) {
 }
 
 /**
+ * Resolve the previousEntity hint into an OSRM leg + the language-neutral
+ * fact string we inject into the prompt. Returns `{ leg, promptFact }` where
+ * both are nullable so callers can skip the header gracefully.
+ */
+async function resolvePreviousLeg(params) {
+  const prev = params.previousEntity;
+  if (!prev) return { leg: null, promptFact: null };
+  const prevQuery = (prev.disambiguationQuery || prev.name || "").trim();
+  const currentQuery = (params.disambiguationQuery || params.userInput || "").trim();
+  if (!prevQuery || !currentQuery) return { leg: null, promptFact: null };
+  const leg = await getRouteBetween(prevQuery, currentQuery, {
+    outputLanguage: params.outputLanguage,
+  });
+  if (!leg) return { leg: null, promptFact: null };
+  // Use display-friendly names (entity.name) for the header rather than the
+  // longer disambiguation query.
+  leg.fromName = prev.name || leg.fromName;
+  leg.toName = params.userInput || leg.toName;
+  return { leg, promptFact: formatLegForPrompt(leg) };
+}
+
+/**
  * Non-streaming content generation. Returns { text, sources }.
  */
 export async function generateTravelContent(params) {
@@ -223,23 +247,27 @@ export async function generateTravelContent(params) {
         (!params.documentImages || params.documentImages.length === 0)),
   );
 
-  let searchOutcome = null;
-  if (useWebSearch) {
-    searchOutcome = await fetchSearchOutcome(params);
-    if (searchOutcome.error) {
-      console.warn("[openai] tavily search note:", searchOutcome.error);
-    }
+  // Run search + route lookup in parallel; both can take a few seconds.
+  const [searchOutcome, legInfo] = await Promise.all([
+    useWebSearch ? fetchSearchOutcome(params) : Promise.resolve(null),
+    resolvePreviousLeg(params),
+  ]);
+  if (searchOutcome?.error) {
+    console.warn("[openai] tavily search note:", searchOutcome.error);
   }
   const searchContext = searchOutcome
     ? formatSearchResultsForPrompt(searchOutcome)
     : "";
 
-  const requestParams = buildResponsesParams(params, searchContext);
+  const requestParams = buildResponsesParams(params, searchContext, legInfo.promptFact);
   const apiCall = async () => {
     const client = getClient();
     const response = await client.responses.create(requestParams);
+    const cleaned = sanitizeText(response.output_text || "");
+    const header = formatLegHeader(legInfo.leg, params.outputLanguage);
+    const text = header ? `${header}\n\n${cleaned}` : cleaned;
     return {
-      text: sanitizeText(response.output_text || ""),
+      text,
       sources: searchOutcome?.sources || [],
     };
   };
@@ -258,20 +286,25 @@ export async function streamTravelContent(params, { onDelta }) {
         (!params.documentImages || params.documentImages.length === 0)),
   );
 
-  let searchOutcome = null;
-  if (useWebSearch) {
-    searchOutcome = await fetchSearchOutcome(params);
-    if (searchOutcome.error) {
-      console.warn("[openai] tavily search note:", searchOutcome.error);
-    }
+  const [searchOutcome, legInfo] = await Promise.all([
+    useWebSearch ? fetchSearchOutcome(params) : Promise.resolve(null),
+    resolvePreviousLeg(params),
+  ]);
+  if (searchOutcome?.error) {
+    console.warn("[openai] tavily search note:", searchOutcome.error);
   }
   const searchContext = searchOutcome
     ? formatSearchResultsForPrompt(searchOutcome)
     : "";
 
-  const requestParams = buildResponsesParams(params, searchContext);
+  const requestParams = buildResponsesParams(params, searchContext, legInfo.promptFact);
   const apiCall = async () => {
     const client = getClient();
+    // Emit the distance header as the very first delta so the user sees it
+    // before the model's prose begins streaming.
+    const header = formatLegHeader(legInfo.leg, params.outputLanguage);
+    if (header) onDelta(`${header}\n\n`);
+
     const stream = await client.responses.stream(requestParams);
     const sanitizer = createStreamSanitizer({ flush: onDelta });
     for await (const event of stream) {

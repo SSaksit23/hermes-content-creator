@@ -318,6 +318,23 @@ const App: React.FC = () => {
 
         setGeneratedItems(prev => prev.map(p => p.id === item.id ? { ...p, status: 'generating' } : p));
 
+        // Find the previous same-day entity (if any) to hint the OSRM route
+        // lookup on the server. First-of-day items get no previousEntity, so
+        // they generate without a distance header.
+        let previousEntity: { name: string; disambiguationQuery: string } | undefined;
+        if (item.day) {
+          for (let j = i - 1; j >= 0; j--) {
+            const candidate = itemsToProcess[j];
+            if (candidate.day === item.day) {
+              previousEntity = {
+                name: candidate.name,
+                disambiguationQuery: candidate.disambiguationQuery || candidate.name,
+              };
+              break;
+            }
+          }
+        }
+
         const result = await generateTravelContent({
           contentType: item.type,
           inputLanguage,
@@ -331,6 +348,7 @@ const App: React.FC = () => {
           socialPlatform: item.socialPlatform,
           talkingPoints: item.talkingPoints,
           day: item.day,
+          previousEntity,
           onChunk: (text) => {
             setGeneratedItems(prev => prev.map(p => p.id === item.id ? { ...p, content: text } : p));
           }
