@@ -9,7 +9,10 @@ import { sanitizeText } from './sanitize';
 //   v3 — opening-paragraph guidance overhauled (no more "wind on the face")
 //   v4 — OSRM "distance from previous stop" header injected per item
 //   v4a — fix: walk the live items list to find previous same-day predecessor
-const POST_PROCESS_VERSION = 'v4a-distance-header';
+//   v5 — city-anchored geocoding; old rows often used wrong-city coords, so
+//        their "distance from previous stop" header is wrong even though the
+//        body text is fine. Bumping forces a fresh fetch with correct coords.
+const POST_PROCESS_VERSION = 'v5-city-anchored';
 
 /**
  * The client no longer talks to any LLM directly — all calls go through the

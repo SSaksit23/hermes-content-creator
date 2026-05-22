@@ -7,6 +7,15 @@ import { ContentDisplay } from './components/ContentDisplay';
 import { EntityEditorModal } from './components/EntityEditorModal';
 import { SettingsModal } from './components/SettingsModal';
 import { generateTravelContent, extractEntitiesFromDocument } from './services/geminiService';
+import {
+  geocodeItems,
+  routeLegs as fetchRouteLegs,
+  buildSameDayPairs,
+  attachCityHints,
+  type LatLng,
+  type RouteLegResult,
+  type GeocodeInput,
+} from './services/mapService';
 import type { Language, Tone, EditableEntity, GeneratedItem, Preset } from './types';
 import { ContentType } from './types';
 import { INPUT_LANGUAGES, OUTPUT_LANGUAGES } from './constants';
@@ -55,11 +64,200 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [lastAction, setLastAction] = useState<(() => void) | null>(null);
 
+  // Map data: resolved coordinates per item id, and OSRM legs between
+  // consecutive same-day stops. Both populate lazily in the background as
+  // geocoding completes — missing entries simply mean a pin/leg is skipped.
+  const [itemCoords, setItemCoords] = useState<Record<string, LatLng>>({});
+  const [routeLegs, setRouteLegs] = useState<RouteLegResult[]>([]);
+
   // Mirror of generatedItems for use inside runGenerationLoop's stable
   // useCallback closure: lets us walk back to the previous same-day item
   // when regenerating or resuming without re-creating the loop callback.
   const generatedItemsRef = useRef<GeneratedItem[]>([]);
   useEffect(() => { generatedItemsRef.current = generatedItems; }, [generatedItems]);
+
+  // Mirror itemCoords so the map data kick-off can compute same-day pairs
+  // against the latest resolved coordinates without re-creating its callback.
+  const itemCoordsRef = useRef<Record<string, LatLng>>({});
+  useEffect(() => { itemCoordsRef.current = itemCoords; }, [itemCoords]);
+
+  // Tracks item ids we've already tried to geocode (success or fail) so the
+  // auto-fill effect below doesn't retry items that legitimately have no
+  // Nominatim hit and would otherwise be re-queried on every render.
+  const geocodeAttemptedRef = useRef<Set<string>>(new Set());
+
+  // Item ids whose geocoded position landed >150 km from the day's city
+  // anchor. Used to flag legs as suspicious in the UI without dropping the
+  // pin. Lives outside React state because it's pure derived metadata
+  // recomputed by the kick-off; persisting it in state isn't worth the churn.
+  const suspiciousIdsRef = useRef<Set<string>>(new Set());
+
+  /** Same heuristic the server uses to identify a City entity. */
+  const isCityType = (t?: string) => /city/i.test(t || '');
+  /** km from anchor above which we consider a result probably wrong. */
+  const SUSPICIOUS_ANCHOR_KM = 150;
+
+  // Kick off geocoding + routing for a set of items. Runs entirely in the
+  // background — failures degrade gracefully (missing pins / legs are skipped
+  // on the map). Safe to call multiple times; mapService caches lookups by
+  // query / coord pair so repeats are cheap.
+  // Declared up here (before any effect that depends on it) because the
+  // auto-fill effect below reads it via its deps array during render; a
+  // later `const` declaration would hit a Temporal Dead Zone in the bundled
+  // output and crash the whole component.
+  const kickOffMapData = useCallback(async (
+    items: Array<{ id: string; name: string; day?: string; disambiguationQuery?: string; type?: string }>,
+    language: Language,
+  ) => {
+    if (items.length === 0) return;
+
+    // Helper that runs a final route-leg fetch over the current item list and
+    // merges the result into state. We always run pairs through `attachCityHints`
+    // first (only for finding suspicious endpoints), then mark legs accordingly.
+    const fillRoutes = async (allItems: typeof items) => {
+      const pairs = buildSameDayPairs(allItems, itemCoordsRef.current, suspiciousIdsRef.current);
+      if (pairs.length === 0) return;
+      const legs = await fetchRouteLegs(pairs);
+      if (legs.length === 0) return;
+      setRouteLegs(prev => {
+        const key = (l: RouteLegResult) => `${l.fromId}|${l.toId}`;
+        const map = new Map<string, RouteLegResult>();
+        for (const l of prev) map.set(key(l), l);
+        for (const l of legs) map.set(key(l), l);
+        return Array.from(map.values());
+      });
+    };
+
+    const fresh = items.filter(i => !geocodeAttemptedRef.current.has(i.id));
+    if (fresh.length === 0) {
+      try { await fillRoutes(items); }
+      catch (err) { console.warn('[App] route fill failed:', err); }
+      return;
+    }
+    for (const it of fresh) geocodeAttemptedRef.current.add(it.id);
+
+    try {
+      // ---------------- Phase 1: geocode City items first ----------------
+      // Resolving the day's city anchor up front gives every subsequent
+      // attraction / meal lookup a strong city hint AND an anchorCoord the
+      // server uses to compute anchorDistanceKm.
+      const cityFresh = fresh.filter(i => isCityType(i.type));
+      const nonCityFresh = fresh.filter(i => !isCityType(i.type));
+
+      const cityCoordsByDay = new Map<string, LatLng>();
+      const updateCityAnchors = (partial: Record<string, LatLng>) => {
+        for (const [id, c] of Object.entries(partial)) {
+          const cityItem = items.find(it => it.id === id);
+          if (!cityItem) continue;
+          cityCoordsByDay.set(cityItem.day || '', c);
+        }
+      };
+
+      if (cityFresh.length > 0) {
+        const cityInput: GeocodeInput[] = cityFresh.map(i => ({
+          id: i.id,
+          name: i.name,
+          day: i.day,
+          disambiguationQuery: i.disambiguationQuery,
+          type: i.type,
+        }));
+        const cityResult = await geocodeItems(cityInput, language, (partial) => {
+          if (Object.keys(partial.coords).length === 0) return;
+          updateCityAnchors(partial.coords);
+          setItemCoords(prev => ({ ...prev, ...partial.coords }));
+        });
+        updateCityAnchors(cityResult.coords);
+      }
+
+      // Fill in city anchors for any City entity already resolved in a prior
+      // run (cached / restored from autosave) but not in `fresh`.
+      for (const it of items) {
+        if (!isCityType(it.type)) continue;
+        if (cityCoordsByDay.has(it.day || '')) continue;
+        const c = itemCoordsRef.current[it.id];
+        if (c) cityCoordsByDay.set(it.day || '', c);
+      }
+
+      // ---------------- Phase 2: geocode non-City items ----------------
+      // Carry day-city pairing forward across days: if a day has no City of
+      // its own, reuse the previous day's anchor (matches attachCityHints).
+      let lastSeenCity: LatLng | undefined;
+      const anchorByDay = new Map<string, LatLng>();
+      // Walk items in itinerary order so previous-day fallback is correct.
+      for (const it of items) {
+        if (isCityType(it.type)) {
+          const c = cityCoordsByDay.get(it.day || '') || itemCoordsRef.current[it.id];
+          if (c) lastSeenCity = c;
+        }
+        const dayKey = it.day || '';
+        if (!anchorByDay.has(dayKey)) {
+          const anchor = cityCoordsByDay.get(dayKey) || lastSeenCity;
+          if (anchor) anchorByDay.set(dayKey, anchor);
+        }
+      }
+
+      const hinted = attachCityHints(
+        nonCityFresh.map(i => ({
+          id: i.id,
+          name: i.name,
+          day: i.day,
+          disambiguationQuery: i.disambiguationQuery,
+          type: i.type,
+        })),
+      ).map<GeocodeInput>(i => ({
+        ...i,
+        anchorCoord: anchorByDay.get(i.day || ''),
+      }));
+
+      // We also need to re-walk attachCityHints over the FULL item list (so
+      // its per-day city lookup sees City entries even when they're not in
+      // `fresh`); but since `attachCityHints` only consumes `name` and
+      // `type`, passing only nonCityFresh + the existing City entries via
+      // the city anchors above is equivalent — we don't need a second pass.
+
+      let mergedCoords: Record<string, LatLng> = { ...itemCoordsRef.current };
+      // Apply any city coords that just resolved (mergedCoords already
+      // reflects state updates that may have flushed, but ref + state can
+      // briefly diverge; explicitly merge to be safe).
+      for (const [dayKey, anchor] of cityCoordsByDay) {
+        const cityItem = items.find(i => isCityType(i.type) && (i.day || '') === dayKey);
+        if (cityItem) mergedCoords[cityItem.id] = anchor;
+      }
+
+      if (hinted.length > 0) {
+        const nonCityResult = await geocodeItems(hinted, language, (partial) => {
+          if (Object.keys(partial.coords).length === 0) return;
+          setItemCoords(prev => ({ ...prev, ...partial.coords }));
+          mergedCoords = { ...mergedCoords, ...partial.coords };
+          for (const [id, d] of Object.entries(partial.anchorDistanceKm)) {
+            if (d > SUSPICIOUS_ANCHOR_KM) suspiciousIdsRef.current.add(id);
+            else suspiciousIdsRef.current.delete(id);
+          }
+        });
+        mergedCoords = { ...mergedCoords, ...nonCityResult.coords };
+        for (const [id, d] of Object.entries(nonCityResult.anchorDistanceKm)) {
+          if (d > SUSPICIOUS_ANCHOR_KM) suspiciousIdsRef.current.add(id);
+          else suspiciousIdsRef.current.delete(id);
+        }
+      }
+
+      // ---------------- Phase 3: routes ----------------
+      const pairs = buildSameDayPairs(items, mergedCoords, suspiciousIdsRef.current);
+      if (pairs.length === 0) return;
+      const legs = await fetchRouteLegs(pairs);
+      if (legs.length > 0) {
+        setRouteLegs(prev => {
+          const key = (l: RouteLegResult) => `${l.fromId}|${l.toId}`;
+          const map = new Map<string, RouteLegResult>();
+          for (const l of prev) map.set(key(l), l);
+          for (const l of legs) map.set(key(l), l);
+          return Array.from(map.values());
+        });
+      }
+    } catch (err) {
+      console.warn('[App] map data kick-off failed:', err);
+    }
+  }, []);
 
   const AUTOSAVE_KEY = 'travelAIAutosave_v2';
   const PRESETS_KEY = 'travelAIPresets_v2';
@@ -73,12 +271,14 @@ const App: React.FC = () => {
       const dataToSave = {
         items: generatedItems,
         selectedId: selectedItemId,
+        itemCoords,
+        routeLegs,
       };
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(dataToSave));
     } catch (err) {
       console.error("Failed to save state to localStorage:", err);
     }
-  }, [generatedItems, selectedItemId]);
+  }, [generatedItems, selectedItemId, itemCoords, routeLegs]);
 
 
   useEffect(() => {
@@ -92,6 +292,12 @@ const App: React.FC = () => {
             setSelectedItemId(savedData.selectedId);
           } else {
             setSelectedItemId(savedData.items[0].id);
+          }
+          if (savedData.itemCoords && typeof savedData.itemCoords === 'object') {
+            setItemCoords(savedData.itemCoords as Record<string, LatLng>);
+          }
+          if (Array.isArray(savedData.routeLegs)) {
+            setRouteLegs(savedData.routeLegs as RouteLegResult[]);
           }
         }
       }
@@ -107,6 +313,27 @@ const App: React.FC = () => {
       localStorage.removeItem(PRESETS_KEY);
     }
   }, []);
+
+  // Auto-fill map data whenever items exist but their coordinates don't.
+  // This covers the case where an autosave from a prior (pre-map) session is
+  // restored — without this, the user would have to start a new generation
+  // run before any pins appear. The geocodeAttemptedRef inside kickOffMapData
+  // ensures we don't loop on items that legitimately have no Nominatim hit.
+  useEffect(() => {
+    if (generatedItems.length === 0) return;
+    const missing = generatedItems.filter(i => !itemCoords[i.id]);
+    if (missing.length === 0) return;
+    void kickOffMapData(
+      generatedItems.map(i => ({
+        id: i.id,
+        name: i.name,
+        day: i.day,
+        disambiguationQuery: i.disambiguationQuery,
+        type: i.type,
+      })),
+      outputLanguage,
+    );
+  }, [generatedItems, itemCoords, kickOffMapData, outputLanguage]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -134,6 +361,10 @@ const App: React.FC = () => {
     setError(null);
     setGeneratedItems([]);
     setSelectedItemId(null);
+    setItemCoords({});
+    setRouteLegs([]);
+    geocodeAttemptedRef.current = new Set();
+    suspiciousIdsRef.current = new Set();
 
     try {
       if (file.type === 'text/plain') {
@@ -409,21 +640,74 @@ const App: React.FC = () => {
     }));
     
     setGeneratedItems(initialItems);
+    setItemCoords({});
+    setRouteLegs([]);
+    geocodeAttemptedRef.current = new Set();
+    suspiciousIdsRef.current = new Set();
     if (initialItems.length > 0) {
       setSelectedItemId(initialItems[0].id);
     }
 
+    // Fire-and-forget: map fills in while LLM generation streams.
+    void kickOffMapData(
+      initialItems.map(i => ({
+        id: i.id,
+        name: i.name,
+        day: i.day,
+        disambiguationQuery: i.disambiguationQuery,
+        type: i.type,
+      })),
+      outputLanguage,
+    );
+
     setLastAction(() => () => runGenerationLoop(initialItems));
     await runGenerationLoop(initialItems);
-  }, [runGenerationLoop]);
+  }, [runGenerationLoop, kickOffMapData, outputLanguage]);
 
   const handleResumeGeneration = useCallback(() => {
     const pendingItems = generatedItems.filter(i => i.status !== 'completed');
     if (pendingItems.length > 0) {
       setLastAction(() => () => runGenerationLoop(pendingItems));
       runGenerationLoop(pendingItems);
+      // Also (re)kick map data for everything currently in the list, so any
+      // items that were never geocoded get a pin once we come back online.
+      void kickOffMapData(
+        generatedItems.map(i => ({
+          id: i.id,
+          name: i.name,
+          day: i.day,
+          disambiguationQuery: i.disambiguationQuery,
+          type: i.type,
+        })),
+        outputLanguage,
+      );
     }
-  }, [generatedItems, runGenerationLoop]);
+  }, [generatedItems, runGenerationLoop, kickOffMapData, outputLanguage]);
+
+  // Remove an item from the itinerary entirely: drops it from the generated
+  // items list, its coordinate, and any route leg that touches it. We also
+  // forget the "we already tried to geocode this" flag so re-adding the same
+  // entity later (via a fresh confirm flow) is allowed to retry.
+  const handleRemoveItem = useCallback((id: string) => {
+    setGeneratedItems(prev => {
+      const next = prev.filter(p => p.id !== id);
+      // Re-select something reasonable if the user removed the current item.
+      setSelectedItemId(curr => {
+        if (curr !== id) return curr;
+        return next.length > 0 ? next[0].id : null;
+      });
+      return next;
+    });
+    setItemCoords(prev => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setRouteLegs(prev => prev.filter(l => l.fromId !== id && l.toId !== id));
+    geocodeAttemptedRef.current.delete(id);
+    suspiciousIdsRef.current.delete(id);
+  }, []);
 
   const handleRegenerateItem = useCallback((id: string) => {
     const itemToRegenerate = generatedItems.find(i => i.id === id);
@@ -554,6 +838,9 @@ const App: React.FC = () => {
             onRetry={handleRetry}
             onResume={handleResumeGeneration}
             onRegenerate={handleRegenerateItem}
+            onRemoveItem={handleRemoveItem}
+            itemCoords={itemCoords}
+            routeLegs={routeLegs}
           />
         </div>
       </main>

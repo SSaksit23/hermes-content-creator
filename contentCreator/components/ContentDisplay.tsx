@@ -13,6 +13,8 @@ import {
     exportAllAsMarkdown,
     exportAllAsDocx
 } from '../services/exportService';
+import { MapView, type MapLocation } from './MapView';
+import type { LatLng, RouteLegResult } from '../services/mapService';
 
 interface ContentDisplayProps {
   items: GeneratedItem[];
@@ -27,6 +29,9 @@ interface ContentDisplayProps {
   onRetry?: () => void;
   onResume?: () => void;
   onRegenerate?: (id: string) => void;
+  onRemoveItem?: (id: string) => void;
+  itemCoords?: Record<string, LatLng>;
+  routeLegs?: RouteLegResult[];
 }
 
 const LoadingState: React.FC<{isAnalyzing: boolean; generationProgress: string}> = ({ isAnalyzing, generationProgress }) => {
@@ -113,12 +118,56 @@ export const ContentDisplay: React.FC<ContentDisplayProps> = ({
     onRetry,
     onResume,
     onRegenerate,
+    onRemoveItem,
+    itemCoords,
+    routeLegs,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [isAllExportMenuOpen, setIsAllExportMenuOpen] = useState(false);
   const allExportMenuRef = useRef<HTMLDivElement>(null);
+  const [viewTab, setViewTab] = useState<'text' | 'map'>('text');
+
+  const mapLocations: MapLocation[] = useMemo(() => {
+    if (!itemCoords) return [];
+    return items
+      .map(it => {
+        const c = itemCoords[it.id];
+        if (!c) return null;
+        return {
+          id: it.id,
+          name: it.name,
+          day: it.day,
+          lat: c.lat,
+          lng: c.lng,
+        } as MapLocation;
+      })
+      .filter((x): x is MapLocation => x !== null);
+  }, [items, itemCoords]);
+
+  // Index legs by `toId` so the sidebar can show the inbound distance/time
+  // banner above each item ("↓ 5 km · 12 min from previous stop").
+  const routeByToId = useMemo(() => {
+    const m = new Map<string, RouteLegResult>();
+    for (const leg of routeLegs || []) m.set(leg.toId, leg);
+    return m;
+  }, [routeLegs]);
+
+  const formatLegLabel = (leg: RouteLegResult): string => {
+    const km = typeof leg.distanceKm === 'number'
+      ? (leg.distanceKm < 10 ? leg.distanceKm.toFixed(1) : Math.round(leg.distanceKm).toString())
+      : null;
+    const min = typeof leg.durationMinutes === 'number'
+      ? Math.max(1, Math.round(leg.durationMinutes))
+      : null;
+    if (km == null || min == null) return '';
+    const time = min < 60
+      ? `${min} min`
+      : (min % 60 === 0 ? `${Math.floor(min / 60)}h` : `${Math.floor(min / 60)}h ${min % 60}m`);
+    const approx = leg.estimated ? '~' : '';
+    return `${approx}${km} km · ${time}`;
+  };
 
   const selectedItem = items.find(item => item.id === selectedItemId);
   
@@ -266,6 +315,24 @@ export const ContentDisplay: React.FC<ContentDisplayProps> = ({
                         <p className="text-sm text-slate-400">{selectedItem.type}</p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex rounded-md overflow-hidden border border-slate-700 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setViewTab('text')}
+                            className={`px-2.5 py-1.5 transition-colors ${viewTab === 'text' ? 'bg-cyan-700 text-white' : 'bg-slate-700/40 text-slate-300 hover:bg-slate-700'}`}
+                            title="Show generated text"
+                          >
+                            Text
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewTab('map')}
+                            className={`px-2.5 py-1.5 transition-colors ${viewTab === 'map' ? 'bg-cyan-700 text-white' : 'bg-slate-700/40 text-slate-300 hover:bg-slate-700'}`}
+                            title="Show itinerary on a map"
+                          >
+                            Map
+                          </button>
+                        </div>
                         {onRegenerate && (
                           <button
                               onClick={() => onRegenerate(selectedItem.id)}
@@ -307,7 +374,17 @@ export const ContentDisplay: React.FC<ContentDisplayProps> = ({
                       </div>
                   </header>
                   
-                  {selectedItem.status === 'pending' ? (
+                  {viewTab === 'map' ? (
+                    <div className="w-full flex-grow min-h-0">
+                      <MapView
+                        locations={mapLocations}
+                        routes={routeLegs || []}
+                        selectedId={selectedItemId}
+                        onSelect={onSelectItem}
+                        totalItems={items.length}
+                      />
+                    </div>
+                  ) : selectedItem.status === 'pending' ? (
                     <div className="w-full flex-grow flex flex-col items-center justify-center text-slate-500 space-y-3">
                       <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
                         <span className="text-xl">⏳</span>
@@ -373,25 +450,71 @@ export const ContentDisplay: React.FC<ContentDisplayProps> = ({
                         <div key={day} className="space-y-1">
                             <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-2 mb-1 border-b border-slate-700/30">{day}</h4>
                             <ul className="space-y-0.5">
-                              {dayItems.map((item) => (
+                              {dayItems.map((item, idx) => {
+                                const leg = idx > 0 ? routeByToId.get(item.id) : undefined;
+                                const legLabel = leg ? formatLegLabel(leg) : '';
+                                return (
                                 <li key={item.id}>
-                                  <button 
-                                    onClick={() => onSelectItem(item.id)}
-                                    className={`w-full text-left p-2 rounded-md text-sm transition-colors group flex items-center justify-between ${selectedItemId === item.id ? 'bg-cyan-800/60 text-white' : 'text-slate-300 hover:bg-slate-700/80'}`}
+                                  {legLabel && (
+                                    <div
+                                      className={`flex items-center gap-2 px-2 py-0.5 text-[10px] ${leg?.suspicious ? 'text-rose-400' : 'text-slate-500'}`}
+                                      title={
+                                        leg?.suspicious
+                                          ? 'Likely wrong location — one of these stops geocoded far from its day\u2019s city. Click \u2715 to remove a bad entry.'
+                                          : leg?.estimated
+                                            ? 'Approximate (straight-line estimate)'
+                                            : 'Driving distance via OSRM'
+                                      }
+                                    >
+                                      <span className="flex-shrink-0 leading-none">{leg?.suspicious ? '?' : '↓'}</span>
+                                      <span className={`flex-grow border-t border-dashed ${leg?.suspicious ? 'border-rose-500/40' : 'border-slate-700/70'}`} />
+                                      <span
+                                        className={`flex-shrink-0 ${
+                                          leg?.suspicious
+                                            ? 'italic text-rose-400'
+                                            : leg?.estimated
+                                              ? 'text-slate-500/70 italic'
+                                              : 'text-slate-400'
+                                        }`}
+                                      >
+                                        {legLabel}
+                                      </span>
+                                    </div>
+                                  )}
+                                  <div
+                                    className={`group flex items-center justify-between rounded-md text-sm transition-colors ${selectedItemId === item.id ? 'bg-cyan-800/60 text-white' : 'text-slate-300 hover:bg-slate-700/80'}`}
                                   >
-                                    <div className="min-w-0 flex-grow pr-2">
+                                    <button
+                                      onClick={() => onSelectItem(item.id)}
+                                      className="flex-grow min-w-0 text-left p-2 pr-1"
+                                    >
                                       <span className="font-medium truncate block leading-tight">{item.name}</span>
                                       <span className={`text-[10px] ${selectedItemId === item.id ? 'text-cyan-300' : 'text-slate-500 group-hover:text-slate-400'}`}>{item.type}</span>
-                                    </div>
-                                    <div className="flex-shrink-0">
+                                    </button>
+                                    <div className="flex items-center gap-1.5 pr-2 flex-shrink-0">
                                       {item.status === 'generating' && <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse block" title="Generating"></span>}
                                       {item.status === 'error' && <span className="w-2 h-2 rounded-full bg-red-500 block" title="Error"></span>}
                                       {item.status === 'completed' && <span className="w-2 h-2 rounded-full bg-green-500 block" title="Completed"></span>}
                                       {item.status === 'pending' && <span className="w-2 h-2 rounded-full bg-slate-600 block" title="Pending"></span>}
+                                      {onRemoveItem && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onRemoveItem(item.id);
+                                          }}
+                                          className={`w-5 h-5 rounded flex items-center justify-center text-xs leading-none transition-colors ${selectedItemId === item.id ? 'text-cyan-200 hover:bg-cyan-700/60' : 'text-slate-500 hover:text-red-300 hover:bg-red-900/30 opacity-0 group-hover:opacity-100'}`}
+                                          title={`Remove "${item.name}"`}
+                                          aria-label={`Remove ${item.name}`}
+                                        >
+                                          ✕
+                                        </button>
+                                      )}
                                     </div>
-                                  </button>
+                                  </div>
                                 </li>
-                              ))}
+                                );
+                              })}
                             </ul>
                         </div>
                     ))}

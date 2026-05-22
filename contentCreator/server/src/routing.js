@@ -47,10 +47,12 @@ function haversineKm(a, b) {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-async function callOsrm(from, to) {
+async function callOsrm(from, to, { withGeometry = false } = {}) {
+  const overview = withGeometry ? "full" : "false";
+  const geom = withGeometry ? "&geometries=geojson" : "";
   const url =
     `${OSRM_URL}/${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=false&alternatives=false&steps=false`;
+    `?overview=${overview}&alternatives=false&steps=false${geom}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -62,10 +64,15 @@ async function callOsrm(from, to) {
     const data = await resp.json();
     const route = data?.routes?.[0];
     if (!route || typeof route.distance !== "number") return null;
+    const geometry =
+      withGeometry && Array.isArray(route.geometry?.coordinates)
+        ? route.geometry.coordinates
+        : null;
     return {
       distanceKm: route.distance / 1000,
       durationMinutes: route.duration / 60,
       source: "osrm",
+      geometry,
     };
   } catch (err) {
     console.warn("[routing] OSRM error:", err?.message || err);
@@ -75,11 +82,68 @@ async function callOsrm(from, to) {
   }
 }
 
-function haversineEstimate(from, to) {
+function haversineEstimate(from, to, { withGeometry = false } = {}) {
   const straight = haversineKm(from, to);
   const distanceKm = straight * ROAD_FACTOR;
   const durationMinutes = (distanceKm / AVG_DRIVING_KMH) * 60;
-  return { distanceKm, durationMinutes, source: "haversine" };
+  // For map display we want SOME geometry even on fallback so the user sees
+  // a connector between pins. A two-point straight line is fine.
+  const geometry = withGeometry
+    ? [[from.lng, from.lat], [to.lng, to.lat]]
+    : null;
+  return { distanceKm, durationMinutes, source: "haversine", geometry };
+}
+
+/**
+ * Compute a driving leg between two known coordinates. Used by both the
+ * "distance from previous stop" header path (no geometry needed) and the
+ * map-route path (geometry required).
+ *
+ * @param {{lat:number,lng:number}} from
+ * @param {{lat:number,lng:number}} to
+ * @param {{ withGeometry?: boolean }} [opts]
+ * @returns {Promise<{
+ *   distanceKm: number,
+ *   durationMinutes: number,
+ *   source: "osrm" | "haversine",
+ *   geometry: [number,number][] | null,
+ *   estimated: boolean,
+ * } | null>}
+ */
+export async function getRouteFromCoords(from, to, opts = {}) {
+  const withGeometry = Boolean(opts.withGeometry);
+  if (!from || !to) return null;
+  if (!Number.isFinite(from.lat) || !Number.isFinite(from.lng)) return null;
+  if (!Number.isFinite(to.lat) || !Number.isFinite(to.lng)) return null;
+
+  // Cache key includes a geometry flag so a no-geometry hit isn't returned
+  // when geometry is required (and vice versa).
+  const cacheKey =
+    `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}` +
+    (withGeometry ? "|g" : "");
+  if (routeCache.has(cacheKey)) {
+    return routeCache.get(cacheKey);
+  }
+
+  let outcome = await callOsrm(from, to, { withGeometry });
+  let estimated = false;
+  if (!outcome) {
+    outcome = haversineEstimate(from, to, { withGeometry });
+    estimated = true;
+  } else if (outcome.distanceKm < 0.01) {
+    outcome = haversineEstimate(from, to, { withGeometry });
+    estimated = true;
+  }
+
+  const result = {
+    distanceKm: outcome.distanceKm,
+    durationMinutes: outcome.durationMinutes,
+    source: outcome.source,
+    geometry: outcome.geometry,
+    estimated,
+  };
+  cacheSet(cacheKey, result);
+  return result;
 }
 
 /**
@@ -107,36 +171,9 @@ export async function getRouteBetween(prevQuery, currentQuery, opts = {}) {
   const to = await geocode(curr, opts);
   if (!from || !to) return null;
 
-  const cacheKey = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(4)},${to.lng.toFixed(4)}`;
-  if (routeCache.has(cacheKey)) {
-    const cached = routeCache.get(cacheKey);
-    return {
-      ...cached,
-      fromName: prev,
-      toName: curr,
-    };
-  }
-
-  let outcome = await callOsrm(from, to);
-  let estimated = false;
-  if (!outcome) {
-    outcome = haversineEstimate(from, to);
-    estimated = true;
-  } else if (outcome.distanceKm < 0.01) {
-    // OSRM occasionally returns a zero-length route when the points snap to
-    // the same node; trust the straight-line estimate in that case.
-    outcome = haversineEstimate(from, to);
-    estimated = true;
-  }
-
-  const result = {
-    distanceKm: outcome.distanceKm,
-    durationMinutes: outcome.durationMinutes,
-    source: outcome.source,
-    estimated,
-  };
-  cacheSet(cacheKey, result);
-  return { ...result, fromName: prev, toName: curr };
+  const route = await getRouteFromCoords(from, to);
+  if (!route) return null;
+  return { ...route, fromName: prev, toName: curr };
 }
 
 /**

@@ -19,6 +19,7 @@ const USER_AGENT =
 const MIN_INTERVAL_MS = 1100;
 const CACHE_MAX = 500;
 const FETCH_TIMEOUT_MS = 8000;
+const SEARCH_LIMIT = 5;
 
 const cache = new Map();
 let nextSlot = 0;
@@ -53,6 +54,14 @@ async function waitForSlot() {
   }
 }
 
+/** Direct read-through of the cache; null if no entry exists. */
+export function getCachedGeocode(query, outputLanguage) {
+  const q = (query || "").trim();
+  if (!q) return undefined;
+  const key = `${langForOutput(outputLanguage)}::${q.toLowerCase()}`;
+  return cache.get(key);
+}
+
 /**
  * Geocode a place name. Returns `{ lat, lng, displayName }` or `null` if
  * the lookup fails for any reason. Never throws.
@@ -68,7 +77,7 @@ export async function geocode(query, { outputLanguage = "English" } = {}) {
   await waitForSlot();
 
   const url =
-    `${NOMINATIM_URL}?format=json&limit=1&accept-language=${lang}` +
+    `${NOMINATIM_URL}?format=json&limit=${SEARCH_LIMIT}&accept-language=${lang}` +
     `&q=${encodeURIComponent(q)}`;
 
   const controller = new AbortController();

@@ -9,6 +9,7 @@ import {
   activeApiKeyConfigured,
 } from "./llm.js";
 import { isQuotaError } from "./retry.js";
+import { handleGeocodeBatch, handleRoutesBatch } from "./maps.js";
 
 const PORT = Number.parseInt(process.env.PORT || "8787", 10);
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "25mb";
@@ -115,6 +116,10 @@ app.post("/api/llm/generate-content/stream", handleGenerateContentStream);
 app.post("/api/gemini/extract-entities", handleExtractEntities);
 app.post("/api/gemini/generate-content", handleGenerateContent);
 app.post("/api/gemini/generate-content/stream", handleGenerateContentStream);
+
+// Map data: batch geocoding + batch road routes for the MapView.
+app.post("/api/maps/geocode", handleGeocodeBatch);
+app.post("/api/maps/routes", handleRoutesBatch);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found", code: "NOT_FOUND" }));
 

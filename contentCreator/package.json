@@ -12,6 +12,7 @@
     "@supabase/supabase-js": "2.44.4",
     "docx": "8.5.0",
     "mammoth": "1.8.0",
+    "maplibre-gl": "^4.7.1",
     "pdfjs-dist": "4.4.168",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
